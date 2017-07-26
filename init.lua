@@ -1,92 +1,71 @@
+-- Copyright 2017 Jens Remus jens.remus@gmail.com. See LICENSE.
 -- Copyright 2007-2017 Mitchell mitchell.att.foicica.com. See LICENSE.
 
 --[[ This comment is for LuaDoc.
 ---
--- Utilize Ctags with Textadept.
+-- Utilize Cscope with Textadept. Based on Mitchell's Ctags module for Textadept.
 --
--- There are four ways to tell Textadept about *tags* files:
+-- There are four ways to tell Textadept about *cscope.out* files:
 --
---   1. Place a *tags* file in current file's directory. This file will be used
---      in a tag search from any file in that directory.
---   2. Place a *tags* file in a project's root directory. This file will be
---      used in a tag search from any of that project's source files.
---   3. Add a *tags* file or list of *tags* files to the `_M.ctags` table for a
---      project root key. This file(s) will be used in a tag search from any of
---      that project's source files.
---      For example: `_M.ctags['/path/to/project'] = '/path/to/tags'`.
---   4. Add a *tags* file to the `_M.ctags` table. This file will be used in any
---      tag search.
---      For example: `_M.ctags[#_M.ctags + 1] = '/path/to/tags'`.
---   5. As a last resort, if no *tags* files were found, or if there is no match
---      for a given symbol, a temporary *tags* file is generated for the current
---      file and used.
+--   1. Place a *cscope.out* file in current file's directory. This file will be
+--      used in a search from any file in that directory.
+--   2. Place a *cscope.out* file in a project's root directory. This file will
+--      be used in a search from any of that project's source files.
+--   3. Add a *cscope.out* file or list of *cscope.out* files to the `_M.cscope`
+--      table for a project root key. This file(s) will be used in a search from
+--      any of that project's source files.
+--      For example: `_M.cscope['/path/to/project'] = '/path/to/cscope.out'`.
+--   4. Add a *cscope.out* file to the `_M.cscope` table. This file will be used
+--      in any search.
+--      For example: `_M.cscope[#_M.cscope + 1] = '/path/to/cscope.out'`.
 --
--- Textadept will use any and all *tags* files based on the above rules.
--- @field _G.textadept.editing.autocompleters.ctag (function)
---   Autocompleter function for ctags. (Names only; not context-sensitive).
-module('_M.ctags')]]
+-- Textadept will use any and all *cscope.out* files based on the above rules.
+module('_M.cscope')]]
 
 local M = {}
 
--- Default Ctags executable.
-M.CTAGS = 'ctags'
+-- Default Cscope executable.
+M.CSCOPE = 'cscope'
 
--- Searches all available tags files tag *tag* and returns a table of tags
--- found.
--- All Ctags in tags files must be sorted.
+-- Searches all available *cscope.out* files for *tag* and returns a table of
+-- tags found.
 -- @param tag Tag to find.
 -- @return table of tags found with each entry being a table that contains the
---   4 ctags fields
+--   location, file path and name, line number, and line content.
 local function find_tags(tag)
-  -- TODO: binary search?
   local tags = {}
-  local patt = '^('..tag..'%S*)\t(%S+)\t(.-);"\t?(.*)$'
-  -- Determine the tag files to search in.
-  local tag_files = {}
-  local tag_file = ((buffer.filename or ''):match('^.+[/\\]') or
-                    lfs.currentdir()..'/')..'tags' -- current directory's tags
-  if lfs.attributes(tag_file) then tag_files[#tag_files + 1] = tag_file end
+  local patt = '^([^ ]*) ([^ ]+) ([0-9]+) (.*)$'
+  -- Determine the cscope files to search in.
+  local cscope_files = {}
+  local cscope_file = ((buffer.filename or ''):match('^.+[/\\]') or
+                      lfs.currentdir()..'/')..'cscope.out' -- current directory's Cscope file
+  if lfs.attributes(cscope_file) then cscope_files[#cscope_files + 1] = cscope_file end
   if buffer.filename then
     local root = io.get_project_root(buffer.filename)
     if root then
-      tag_file = root..'/tags' -- project's tags
-      if lfs.attributes(tag_file) then tag_files[#tag_files + 1] = tag_file end
-      tag_file = M[root] -- project's specified tags
-      if type(tag_file) == 'string' then
-        tag_files[#tag_files + 1] = tag_file
-      elseif type(tag_file) == 'table' then
-        for i = 1, #tag_file do tag_files[#tag_files + 1] = tag_file[i] end
+      cscope_file = root..'/cscope.out' -- project's Cscope file
+      if lfs.attributes(cscope_file) then cscope_files[#cscope_files + 1] = cscope_file end
+      cscope_file = M[root] -- project's specified Cscope file(s)
+      if type(cscope_file) == 'string' then
+        cscope_files[#cscope_files + 1] = cscope_file
+      elseif type(cscope_file) == 'table' then
+        for i = 1, #cscope_file do cscope_files[#cscope_files + 1] = cscope_file[i] end
       end
     end
   end
-  for i = 1, #M do tag_files[#tag_files + 1] = M[i] end -- global tags
-  -- Search all tags files for matches.
-  local tmpfile
-  ::retry::
-  for i = 1, #tag_files do
-    local dir, found = tag_files[i]:match('^.+[/\\]'), false
-    local f = io.open(tag_files[i])
-    for line in f:lines() do
-      local tag, file, ex_cmd, ext_fields = line:match(patt)
-      if tag then
-        if not file:find('^%a?:?[/\\]') then file = dir..file end
-        if ex_cmd:find('^/') then ex_cmd = ex_cmd:match('^/^(.+)$/$') end
-        tags[#tags + 1] = {tag, file, ex_cmd, ext_fields}
-        found = true
-      elseif found then
-        break -- tags are sorted, so no more matches exist in this file
-      end
+  for i = 1, #M do cscope_files[#cscope_files + 1] = M[i] end -- global Cscope files
+  -- Search all Cscope files for matches.
+  for i = 1, #cscope_files do
+    local dir = cscope_files[i]:match('^.+[/\\]')
+    local p = spawn(M.CSCOPE..' -dLf "'..cscope_files[i]..'" -0 "'..tag..'"')
+    local line = p:read()
+    while (line) do
+      local file, location, line_number, content = line:match(patt)
+      if not file:find('^%a?:?[/\\]') then file = dir..file end
+      tags[#tags + 1] = {location, file, line_number, content}
+      line = p:read()
     end
-    f:close()
   end
-  if #tags == 0 and buffer.filename and not tmpfile then
-    -- If no matches were found, try the current file.
-    tmpfile = os.tmpname()
-    spawn(M.CTAGS..' -o "'..tmpfile..'" "'..buffer.filename..'"'):wait()
-    tag_files = {tmpfile}
-    goto retry
-  end
-  if tmpfile then os.remove(tmpfile) end
   return tags
 end
 
@@ -130,9 +109,10 @@ function M.goto_tag(tag, prev)
     local items = {}
     for i = 1, #tags do
       items[#items + 1] = tags[i][1]
-      items[#items + 1] = tags[i][2]:match('[^/\\]+$') -- filename only
-      items[#items + 1] = tags[i][3]:match('^%s*(.+)$') -- strip indentation
-      items[#items + 1] = tags[i][4]:match('^%a?%s*(.*)$') -- ignore kind
+--      items[#items + 1] = tags[i][2]:match('[^/\\]+$') -- filename only
+      items[#items + 1] = tags[i][2]
+      items[#items + 1] = tags[i][3]
+      items[#items + 1] = tags[i][4]
     end
     local button, i = ui.dialogs.filteredlist{
       title = _L['Go To'],
@@ -155,47 +135,25 @@ function M.goto_tag(tag, prev)
   end
   -- Jump to the tag.
   io.open_file(tag[2])
-  if not tonumber(tag[3]) then
-    for i = 0, buffer.line_count - 1 do
-      if buffer:get_line(i):find(tag[3], 1, true) then
-        textadept.editing.goto_line(i)
-        break
-      end
-    end
-  else
-    textadept.editing.goto_line(tonumber(tag[3]) - 1)
-  end
+  textadept.editing.goto_line(tonumber(tag[3]) - 1)
   -- Store the new position in the jump history.
   jump_list[#jump_list + 1] = {buffer.filename, buffer.current_pos}
   jump_list.pos = #jump_list
-end
-
--- Autocompleter function for ctags.
--- Does not remove duplicates.
-textadept.editing.autocompleters.ctag = function()
-  local completions = {}
-  local s = buffer:word_start_position(buffer.current_pos, true)
-  local e = buffer:word_end_position(buffer.current_pos, true)
-  local tags = find_tags(buffer:text_range(s, e))
-  for i = 1, #tags do completions[#completions + 1] = tags[i][1] end
-  return e - s, completions
 end
 
 -- Add menu entries.
 local m_search = textadept.menu.menubar[_L['_Search']]
 m_search[#m_search + 1] = {''} -- separator
 m_search[#m_search + 1] = {
-  title = '_Ctags',
-  {'_Goto Ctag', M.goto_tag},
-  {'G_oto Ctag...', function()
-    local button, name = ui.dialogs.standard_inputbox{title = 'Goto Tag'}
-    if button == 1 then _M.ctags.goto_tag(name) end
+  title = '_Cscope',
+  {'_Goto', M.goto_tag},
+  {'G_oto...', function()
+    local button, name = ui.dialogs.standard_inputbox{title = 'Goto'}
+    if button == 1 then _M.cscope.goto_tag(name) end
   end},
   {''},
   {'Jump _Back', function() M.goto_tag(nil, true) end},
-  {'Jump _Forward', function() M.goto_tag(nil, false) end},
-  {''},
-  {'_Autocomplete Tag', function() textadept.editing.autocomplete('ctag') end}
+  {'Jump _Forward', function() M.goto_tag(nil, false) end}
 }
 
 return M
